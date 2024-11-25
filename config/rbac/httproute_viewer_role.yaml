@@ -1,0 +1,23 @@
+# permissions for end users to view httproutes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: ingress2httproute
+    app.kubernetes.io/managed-by: kustomize
+  name: httproute-viewer-role
+rules:
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes/status
+  verbs:
+  - get
