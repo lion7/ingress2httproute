@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/json"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -53,12 +54,24 @@ type IngressReconciler struct {
 func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	httpRoute := gatewayv1.HTTPRoute{}
+	httpRouteExists := true
+	if err := r.Get(ctx, req.NamespacedName, &httpRoute); err != nil {
+		if errors.IsNotFound(err) {
+			httpRouteExists = false
+		} else {
+			return ctrl.Result{}, err
+		}
+	}
+
 	ingress := networkingv1.Ingress{}
 	if err := r.Get(ctx, req.NamespacedName, &ingress); err != nil {
 		logger.Error(err, fmt.Sprintf("cannot reconcile ingress %s", req.NamespacedName))
 		if errors.IsNotFound(err) {
-			if err := DeleteIfExists[gatewayv1.HTTPRoute](r.Client, ctx, req.NamespacedName); err != nil {
-				return ctrl.Result{}, err
+			if httpRouteExists {
+				if err := r.Delete(ctx, &httpRoute); err != nil {
+					return ctrl.Result{}, err
+				}
 			}
 			return ctrl.Result{}, nil
 		}
@@ -105,14 +118,32 @@ func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				if err != nil {
 					return ctrl.Result{}, err
 				}
-				backendRefs = append(backendRefs, ref)
+				duplicate := false
+				for _, backendRef := range backendRefs {
+					if isEqual(backendRef, ref) {
+						duplicate = true
+						break
+					}
+				}
+				if !duplicate {
+					backendRefs = append(backendRefs, ref)
+				}
 			}
 			if len(backendRefs) > 0 && ingress.Spec.DefaultBackend != nil {
 				ref, err := mapBackendRef(ctx, r.Client, req.Namespace, *ingress.Spec.DefaultBackend)
 				if err != nil {
 					return ctrl.Result{}, err
 				}
-				backendRefs = append(backendRefs, ref)
+				duplicate := false
+				for _, backendRef := range backendRefs {
+					if isEqual(backendRef, ref) {
+						duplicate = true
+						break
+					}
+				}
+				if !duplicate {
+					backendRefs = append(backendRefs, ref)
+				}
 			}
 			rules = append(rules, gatewayv1.HTTPRouteRule{
 				Matches:     matches,
@@ -150,7 +181,7 @@ func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			if strings.HasPrefix(hostname, "*.") {
 				fqdn := strings.TrimPrefix(hostname, "*.")
 				for _, s := range hostnames {
-					if strings.HasSuffix(string(s), fqdn) {
+					if !strings.EqualFold(string(s), fqdn) && strings.HasSuffix(string(s), fqdn) {
 						parentRefs = append(parentRefs, createParentRef(gateway, listener.Name))
 						continue listeners
 					}
@@ -170,30 +201,39 @@ func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	// Create the owner reference
-	bTrue := true
-	owner := metav1.OwnerReference{
-		APIVersion:         ingress.APIVersion,
-		Kind:               ingress.Kind,
-		Name:               ingress.Name,
-		UID:                ingress.UID,
-		Controller:         &bTrue,
-		BlockOwnerDeletion: &bTrue,
-	}
-	spec := gatewayv1.HTTPRouteSpec{
+	newSpec := gatewayv1.HTTPRouteSpec{
 		CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: parentRefs},
 		Hostnames:       hostnames,
 		Rules:           rules,
 	}
 
-	_, err := GetOrCreate[gatewayv1.HTTPRoute](ctx, r.Client, req.NamespacedName, owner, func() (*gatewayv1.HTTPRoute, error) {
-		return &gatewayv1.HTTPRoute{Spec: spec}, nil
-	})
-	if err != nil {
-		return ctrl.Result{}, err
-	}
+	if !httpRouteExists {
+		// Create the owner reference
+		bTrue := true
+		owner := metav1.OwnerReference{
+			APIVersion:         ingress.APIVersion,
+			Kind:               ingress.Kind,
+			Name:               ingress.Name,
+			UID:                ingress.UID,
+			Controller:         &bTrue,
+			BlockOwnerDeletion: &bTrue,
+		}
 
-	logger.Info("created equivalent HTTPRoute for ingress")
+		httpRoute.SetNamespace(req.Namespace)
+		httpRoute.SetName(req.Name)
+		httpRoute.SetOwnerReferences([]metav1.OwnerReference{owner})
+		if err := r.Create(ctx, &httpRoute); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		logger.Info("created equivalent HTTPRoute for ingress")
+	} else if !isEqual(httpRoute.Spec, newSpec) {
+		httpRoute.Spec = newSpec
+		if err := r.Update(ctx, &httpRoute); err != nil {
+			return ctrl.Result{}, err
+		}
+		logger.Info("updated equivalent HTTPRoute for ingress")
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -232,7 +272,11 @@ func mapBackendRef(ctx context.Context, c client.Client, namespace string, ref n
 		objectRef.Kind = &kind
 		objectRef.Name = name
 	} else if ref.Service != nil {
+		group := gatewayv1.Group("")
+		kind := gatewayv1.Kind("Service")
 		name := gatewayv1.ObjectName(ref.Service.Name)
+		objectRef.Group = &group
+		objectRef.Kind = &kind
 		objectRef.Name = name
 		if ref.Service.Port.Number != 0 {
 			port := gatewayv1.PortNumber(ref.Service.Port.Number)
@@ -251,5 +295,19 @@ func mapBackendRef(ctx context.Context, c client.Client, namespace string, ref n
 			}
 		}
 	}
-	return gatewayv1.HTTPBackendRef{BackendRef: gatewayv1.BackendRef{BackendObjectReference: objectRef}}, nil
+	one := int32(1)
+	return gatewayv1.HTTPBackendRef{BackendRef: gatewayv1.BackendRef{
+		BackendObjectReference: objectRef,
+		Weight:                 &one,
+	}}, nil
+}
+
+func isEqual(a, b interface{}) bool {
+	if l, err := json.Marshal(a); err != nil {
+		return false
+	} else if r, err := json.Marshal(b); err != nil {
+		return false
+	} else {
+		return string(l) == string(r)
+	}
 }
