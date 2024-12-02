@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -18,11 +17,6 @@ func GetOrCreate[K interface{}](ctx context.Context, c client.Client, key types.
 	}
 	if err := c.Get(ctx, key, obj); err != nil {
 		if errors.IsNotFound(err) {
-			if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "capi-system"}}); err != nil {
-				if !errors.IsAlreadyExists(err) {
-					return nil, err
-				}
-			}
 			result, err := factory()
 			if err != nil {
 				return nil, err
