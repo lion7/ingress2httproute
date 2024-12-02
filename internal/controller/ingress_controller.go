@@ -66,15 +66,15 @@ func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	ingress := networkingv1.Ingress{}
 	if err := r.Get(ctx, req.NamespacedName, &ingress); err != nil {
-		logger.Error(err, fmt.Sprintf("cannot reconcile ingress %s", req.NamespacedName))
 		if errors.IsNotFound(err) {
-			if httpRouteExists {
-				if err := r.Delete(ctx, &httpRoute); err != nil {
-					return ctrl.Result{}, err
-				}
+			if !httpRouteExists {
+				return ctrl.Result{}, nil
 			}
-			return ctrl.Result{}, nil
+			if err := r.Delete(ctx, &httpRoute); err != nil {
+				logger.Error(err, fmt.Sprintf("cannot delete HTTPRoute %s", req.NamespacedName))
+			}
 		}
+		logger.Error(err, fmt.Sprintf("cannot reconcile Ingress %s", req.NamespacedName))
 		return ctrl.Result{}, err
 	}
 
