@@ -39,7 +39,8 @@ import (
 // IngressReconciler reconciles an Ingress object
 type IngressReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme         *runtime.Scheme
+	CrossNamespace bool
 }
 
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
@@ -98,9 +99,9 @@ func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	var rules []gatewayv1.HTTPRouteRule
 	for _, rule := range ingress.Spec.Rules {
 		if rule.HTTP != nil {
-			var matches []gatewayv1.HTTPRouteMatch
-			var backendRefs []gatewayv1.HTTPBackendRef
 			for _, path := range rule.HTTP.Paths {
+				var matches []gatewayv1.HTTPRouteMatch
+				var backendRefs []gatewayv1.HTTPBackendRef
 				pathMatch := gatewayv1.HTTPPathMatch{}
 				pathMatch.Value = &path.Path
 				if path.PathType == nil {
@@ -111,10 +112,13 @@ func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				} else if *path.PathType == networkingv1.PathTypePrefix {
 					prefix := gatewayv1.PathMatchPathPrefix
 					pathMatch.Type = &prefix
+				} else if *path.PathType == networkingv1.PathTypeImplementationSpecific {
+					regex := gatewayv1.PathMatchRegularExpression
+					pathMatch.Type = &regex
 				}
 				matches = append(matches, gatewayv1.HTTPRouteMatch{Path: &pathMatch})
 
-				ref, err := mapBackendRef(ctx, r.Client, req.Namespace, path.Backend)
+				ref, err := r.mapBackendRef(ctx, req.Namespace, path.Backend)
 				if err != nil {
 					return ctrl.Result{}, err
 				}
@@ -128,27 +132,27 @@ func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				if !duplicate {
 					backendRefs = append(backendRefs, ref)
 				}
-			}
-			if len(backendRefs) > 0 && ingress.Spec.DefaultBackend != nil {
-				ref, err := mapBackendRef(ctx, r.Client, req.Namespace, *ingress.Spec.DefaultBackend)
-				if err != nil {
-					return ctrl.Result{}, err
-				}
-				duplicate := false
-				for _, backendRef := range backendRefs {
-					if isEqual(backendRef, ref) {
-						duplicate = true
-						break
+				if len(backendRefs) > 0 && ingress.Spec.DefaultBackend != nil {
+					ref, err := r.mapBackendRef(ctx, req.Namespace, *ingress.Spec.DefaultBackend)
+					if err != nil {
+						return ctrl.Result{}, err
+					}
+					duplicate := false
+					for _, backendRef := range backendRefs {
+						if isEqual(backendRef, ref) {
+							duplicate = true
+							break
+						}
+					}
+					if !duplicate {
+						backendRefs = append(backendRefs, ref)
 					}
 				}
-				if !duplicate {
-					backendRefs = append(backendRefs, ref)
-				}
+				rules = append(rules, gatewayv1.HTTPRouteRule{
+					Matches:     matches,
+					BackendRefs: backendRefs,
+				})
 			}
-			rules = append(rules, gatewayv1.HTTPRouteRule{
-				Matches:     matches,
-				BackendRefs: backendRefs,
-			})
 		}
 	}
 	if rules == nil {
@@ -219,7 +223,11 @@ func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			BlockOwnerDeletion: &bTrue,
 		}
 
-		httpRoute.SetNamespace(req.Namespace)
+		if r.CrossNamespace {
+			httpRoute.SetNamespace(req.Namespace)
+		} else {
+
+		}
 		httpRoute.SetName(req.Name)
 		httpRoute.SetOwnerReferences([]metav1.OwnerReference{owner})
 		if err := r.Create(ctx, &httpRoute); err != nil {
@@ -260,7 +268,7 @@ func createParentRef(gateway gatewayv1.Gateway, section gatewayv1.SectionName) g
 	}
 }
 
-func mapBackendRef(ctx context.Context, c client.Client, namespace string, ref networkingv1.IngressBackend) (gatewayv1.HTTPBackendRef, error) {
+func (r *IngressReconciler) mapBackendRef(ctx context.Context, namespace string, ref networkingv1.IngressBackend) (gatewayv1.HTTPBackendRef, error) {
 	var objectRef gatewayv1.BackendObjectReference
 	if ref.Resource != nil {
 		if ref.Resource.APIGroup != nil {
@@ -271,6 +279,10 @@ func mapBackendRef(ctx context.Context, c client.Client, namespace string, ref n
 		name := gatewayv1.ObjectName(ref.Resource.Name)
 		objectRef.Kind = &kind
 		objectRef.Name = name
+		if !r.CrossNamespace {
+			ns := gatewayv1.Namespace(namespace)
+			objectRef.Namespace = &ns
+		}
 	} else if ref.Service != nil {
 		group := gatewayv1.Group("")
 		kind := gatewayv1.Kind("Service")
@@ -278,12 +290,16 @@ func mapBackendRef(ctx context.Context, c client.Client, namespace string, ref n
 		objectRef.Group = &group
 		objectRef.Kind = &kind
 		objectRef.Name = name
+		if !r.CrossNamespace {
+			ns := gatewayv1.Namespace(namespace)
+			objectRef.Namespace = &ns
+		}
 		if ref.Service.Port.Number != 0 {
 			port := gatewayv1.PortNumber(ref.Service.Port.Number)
 			objectRef.Port = &port
 		} else if ref.Service.Port.Name != "" {
 			svc := corev1.Service{}
-			if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Service.Name}, &svc); err != nil {
+			if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Service.Name}, &svc); err != nil {
 				return gatewayv1.HTTPBackendRef{}, err
 			}
 			for _, svcPort := range svc.Spec.Ports {
