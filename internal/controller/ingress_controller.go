@@ -19,8 +19,11 @@ package controller
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/util/json"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/util/json"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -250,6 +253,29 @@ func (r *IngressReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&networkingv1.Ingress{}).
 		Owns(&gatewayv1.HTTPRoute{}).
+		Watches(
+			&gatewayv1.Gateway{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				// This will trigger reconciliation for all Ingresses when any Gateway changes
+				var requests []reconcile.Request
+
+				ingressList := &networkingv1.IngressList{}
+				if err := r.List(ctx, ingressList); err != nil {
+					return requests
+				}
+
+				for _, ingress := range ingressList.Items {
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Name:      ingress.Name,
+							Namespace: ingress.Namespace,
+						},
+					})
+				}
+
+				return requests
+			}),
+		).
 		Complete(r)
 }
 
