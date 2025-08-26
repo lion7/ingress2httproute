@@ -89,7 +89,7 @@ func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			if len(hostnames) == 0 {
 				hostnames = append(hostnames, gatewayv1.Hostname(rule.Host))
 			} else if expected := string(hostnames[0]); rule.Host != expected {
-				return ctrl.Result{}, fmt.Errorf("hostname mismatch, expected %s but got %s", expected, rule.Host)
+				logger.Error(fmt.Errorf("hostname mismatch, expected %s but got %s", expected, rule.Host), "ignoring ingress rule", "ingress", req.NamespacedName, "rule", rule)
 			}
 		}
 	}
