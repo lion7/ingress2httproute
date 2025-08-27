@@ -1,0 +1,116 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: wildcard-app-admin-wildcard-example-com
+  namespace: default
+  ownerReferences:
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    name: wildcard-app
+    uid: "12345678-1234-1234-1234-123456789012"
+    controller: true
+    blockOwnerDeletion: true
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: default
+    name: example-gw
+    sectionName: http
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: default
+    name: wildcard-gw
+    sectionName: wildcard-http
+  hostnames:
+  - "admin.wildcard.example.com"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - group: ""
+      kind: Service
+      name: admin-service
+      namespace: default
+      port: 9090
+      weight: 1
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: wildcard-app-api-wildcard-example-com
+  namespace: default
+  ownerReferences:
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    name: wildcard-app
+    uid: "12345678-1234-1234-1234-123456789012"
+    controller: true
+    blockOwnerDeletion: true
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: default
+    name: example-gw
+    sectionName: http
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: default
+    name: wildcard-gw
+    sectionName: wildcard-http
+  hostnames:
+  - "api.wildcard.example.com"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /v1
+    backendRefs:
+    - group: ""
+      kind: Service
+      name: api-service
+      namespace: default
+      port: 8080
+      weight: 1
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: wildcard-app-exact-example-com
+  namespace: default
+  ownerReferences:
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    name: wildcard-app
+    uid: "12345678-1234-1234-1234-123456789012"
+    controller: true
+    blockOwnerDeletion: true
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: default
+    name: example-gw
+    sectionName: http
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: default
+    name: wildcard-gw
+    sectionName: exact-http
+  hostnames:
+  - "exact.example.com"
+  rules:
+  - matches:
+    - path:
+        type: Exact
+        value: /special
+    backendRefs:
+    - group: ""
+      kind: Service
+      name: special-service
+      namespace: default
+      port: 3000
+      weight: 1

@@ -1,0 +1,56 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: wildcard-app
+  namespace: default
+spec:
+  ingressClassName: prod-class
+  rules:
+  - host: api.wildcard.example.com
+    http:
+      paths:
+      - path: /v1
+        pathType: Prefix
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 8080
+  - host: admin.wildcard.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: admin-service
+            port:
+              number: 9090
+  - host: exact.example.com
+    http:
+      paths:
+      - path: /special
+        pathType: Exact
+        backend:
+          service:
+            name: special-service
+            port:
+              number: 3000
+---
+# Example Gateway with wildcard listener that should match some hosts
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: wildcard-gw
+  namespace: default
+spec:
+  gatewayClassName: prod-class
+  listeners:
+  - name: wildcard-http
+    protocol: HTTP
+    port: 80
+    hostname: "*.wildcard.example.com"  # Should match api.wildcard.example.com and admin.wildcard.example.com
+  - name: exact-http
+    protocol: HTTP
+    port: 8080
+    hostname: "exact.example.com"       # Should match exact.example.com exactly

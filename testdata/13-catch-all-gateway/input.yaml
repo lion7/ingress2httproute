@@ -1,0 +1,42 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: catch-all-test
+  namespace: default
+spec:
+  ingressClassName: prod-class
+  rules:
+  - host: any.domain.com
+    http:
+      paths:
+      - path: /test
+        pathType: Prefix
+        backend:
+          service:
+            name: test-service
+            port:
+              number: 8080
+  - host: another.domain.org
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: another-service
+            port:
+              number: 9090
+---
+# Gateway with no hostname restriction (catch-all)
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: catch-all-gw
+  namespace: default
+spec:
+  gatewayClassName: prod-class
+  listeners:
+  - name: http-catch-all
+    protocol: HTTP
+    port: 80
+    # No hostname specified - accepts all hostnames

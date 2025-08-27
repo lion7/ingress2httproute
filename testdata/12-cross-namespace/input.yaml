@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-namespace
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateway-system
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cross-ns-app
+  namespace: app-namespace
+spec:
+  ingressClassName: prod-class
+  rules:
+  - host: cross.example.com
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: app-service
+            port:
+              number: 8080
+---
+# Gateway in different namespace (gateway-system) than Ingress (app-namespace)
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: shared-gw
+  namespace: gateway-system
+spec:
+  gatewayClassName: prod-class
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    hostname: "*.example.com"
+    allowedRoutes:
+      namespaces:
+        from: All  # Allows routes from any namespace
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-service
+  namespace: app-namespace
+spec:
+  ports:
+  - port: 8080
+    protocol: TCP
+  selector:
+    app: cross-ns-app
