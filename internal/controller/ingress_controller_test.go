@@ -246,11 +246,6 @@ var _ = Describe("Ingress Controller", func() {
 					Fail(fmt.Sprintf("Failed to load output.yaml: %v", err))
 				}
 				expectedHTTPRoutes = findHTTPRoutes(outputObjs)
-
-				// Note: Some test cases (like 10-no-hostname-rules) may have no expected HTTPRoutes
-				if tc != "10-no-hostname-rules" {
-					Expect(expectedHTTPRoutes).NotTo(BeEmpty(), "At least one expected HTTPRoute should exist in output.yaml")
-				}
 			})
 
 			AfterEach(func() {

@@ -1,7 +1,7 @@
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: app-with-default
+  name: app-with-default-app-example-com
   namespace: default
   ownerReferences:
   - apiVersion: networking.k8s.io/v1
@@ -19,8 +19,6 @@ spec:
     sectionName: http
   hostnames:
   - "app.example.com"
-  - "default.example.com"
-  - "static.example.com"
   rules:
   - matches:
     - path:
@@ -30,6 +28,63 @@ spec:
     - name: api-service
       port: 9000
       weight: 1
+    - name: default-service
+      port: 8080
+      weight: 1
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app-with-default-default-example-com
+  namespace: default
+  ownerReferences:
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    name: app-with-default
+    uid: "12345678-1234-1234-1234-123456789012"
+    controller: true
+    blockOwnerDeletion: true
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: default
+    name: example-gw
+    sectionName: http
+  hostnames:
+  - "default.example.com"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: default-service
+      port: 8080
+      weight: 1
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app-with-default-static-example-com
+  namespace: default
+  ownerReferences:
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    name: app-with-default
+    uid: "12345678-1234-1234-1234-123456789012"
+    controller: true
+    blockOwnerDeletion: true
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: default
+    name: example-gw
+    sectionName: http
+  hostnames:
+  - "static.example.com"
+  rules:
   - matches:
     - path:
         type: PathPrefix
@@ -37,4 +92,7 @@ spec:
     backendRefs:
     - name: static-service
       port: 80
+      weight: 1
+    - name: default-service
+      port: 8080
       weight: 1

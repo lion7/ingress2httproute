@@ -1,12 +1,12 @@
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: catch-all-app
+  name: catch-all-test-any-domain-com
   namespace: default
   ownerReferences:
   - apiVersion: networking.k8s.io/v1
     kind: Ingress
-    name: catch-all-app
+    name: catch-all-test
     uid: "12345678-1234-1234-1234-123456789012"
     controller: true
     blockOwnerDeletion: true
@@ -18,17 +18,39 @@ spec:
     name: catch-all-gw
     sectionName: http-catch-all
   hostnames:
-  - "specific.example.com"
-  - "another.example.com"
+  - "any.domain.com"
   rules:
   - matches:
     - path:
         type: PathPrefix
-        value: /api
+        value: /test
     backendRefs:
-    - name: any-service
-      port: 9001
+    - name: test-service
+      port: 8080
       weight: 1
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: catch-all-test-another-domain-org
+  namespace: default
+  ownerReferences:
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    name: catch-all-test
+    uid: "12345678-1234-1234-1234-123456789012"
+    controller: true
+    blockOwnerDeletion: true
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: default
+    name: catch-all-gw
+    sectionName: http-catch-all
+  hostnames:
+  - "another.domain.org"
+  rules:
   - matches:
     - path:
         type: PathPrefix

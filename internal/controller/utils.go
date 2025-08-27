@@ -4,25 +4,10 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/go-logr/logr"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
-
-func filterRules(rules []networkingv1.IngressRule, logger logr.Logger) []networkingv1.IngressRule {
-	var result []networkingv1.IngressRule
-
-	for _, rule := range rules {
-		if rule.Host == "" {
-			logger.Info("ingress rule has no hostname", "rule", rule)
-			continue
-		}
-		result = append(result, rule)
-	}
-
-	return result
-}
 
 func extractHostnames(rules []networkingv1.IngressRule) []gatewayv1.Hostname {
 	// Map to track unique hostnames
@@ -30,7 +15,7 @@ func extractHostnames(rules []networkingv1.IngressRule) []gatewayv1.Hostname {
 
 	var hostnames []gatewayv1.Hostname
 	for _, rule := range rules {
-		if !hostnameMap[rule.Host] {
+		if rule.Host != "" && !hostnameMap[rule.Host] {
 			hostnames = append(hostnames, gatewayv1.Hostname(rule.Host))
 			hostnameMap[rule.Host] = true
 		}
@@ -46,7 +31,8 @@ func hostnameMatches(ingressHostname, listenerHostname gatewayv1.Hostname) bool 
 
 	if strings.HasPrefix(listenerHost, "*.") {
 		fqdn := strings.TrimPrefix(listenerHost, "*.")
-		return !strings.EqualFold(ingressHost, fqdn) && strings.HasSuffix(ingressHost, fqdn)
+		// Allow both subdomain matches and exact domain matches for wildcard patterns
+		return strings.EqualFold(ingressHost, fqdn) || strings.HasSuffix(ingressHost, fqdn)
 	}
 
 	return strings.EqualFold(ingressHost, listenerHost)

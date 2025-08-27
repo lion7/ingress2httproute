@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: priority-test
+  name: priority-app
   namespace: default
 spec:
   ingressClassName: prod-class
@@ -28,7 +28,6 @@ spec:
               number: 80
 ---
 # Multiple Gateways with different specificity levels
----
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
