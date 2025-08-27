@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	networkingv1 "k8s.io/api/networking/v1"
@@ -9,19 +10,13 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
-func extractHostnames(rules []networkingv1.IngressRule) []gatewayv1.Hostname {
-	// Map to track unique hostnames
-	hostnameMap := make(map[string]bool)
-
-	var hostnames []gatewayv1.Hostname
-	for _, rule := range rules {
-		if rule.Host != "" && !hostnameMap[rule.Host] {
-			hostnames = append(hostnames, gatewayv1.Hostname(rule.Host))
-			hostnameMap[rule.Host] = true
-		}
-	}
-
-	return hostnames
+// generateHTTPRouteName creates a HTTPRoute name from ingress name and hostname
+// Following the pattern: ingressName-hostname-with-dots-replaced-by-dashes
+func generateHTTPRouteName(ingressName, hostname string) string {
+	// Replace dots and special characters with dashes for valid Kubernetes names
+	cleanHostname := strings.ReplaceAll(hostname, ".", "-")
+	cleanHostname = strings.ReplaceAll(cleanHostname, "*", "wildcard")
+	return fmt.Sprintf("%s-%s", ingressName, cleanHostname)
 }
 
 // hostnameMatches checks if the ingress hostname matches the gateway listener hostname
@@ -89,14 +84,62 @@ func createPathMatch(path networkingv1.HTTPIngressPath) gatewayv1.HTTPPathMatch 
 	return pathMatch
 }
 
-// containsBackendRef checks if a backend reference already exists in the slice
-func containsBackendRef(backendRefs []gatewayv1.HTTPBackendRef, ref gatewayv1.HTTPBackendRef) bool {
-	for _, backendRef := range backendRefs {
-		if isEqual(backendRef, ref) {
-			return true
+// groupRulesByHostname groups ingress rules by hostname
+func groupRulesByHostname(rules []networkingv1.IngressRule) map[string][]networkingv1.IngressRule {
+	result := make(map[string][]networkingv1.IngressRule)
+
+	for _, rule := range rules {
+		hostname := rule.Host
+		slice, ok := result[hostname]
+		if !ok {
+			slice = []networkingv1.IngressRule{}
+			result[hostname] = slice
+		}
+
+		slice = append(slice, rule)
+	}
+
+	return result
+}
+
+// groupGatewaysByHostNameAndMapToParentRefs groups gateways by hostname and maps each listener to a parent ref
+func groupGatewaysByHostNameAndMapToParentRefs(ingressNamespace string, gateways gatewayv1.GatewayList) map[string][]gatewayv1.ParentReference {
+	result := make(map[string][]gatewayv1.ParentReference)
+
+	for _, gateway := range gateways.Items {
+		for _, listener := range gateway.Spec.Listeners {
+			if !isListenerAccessibleFromNamespace(listener, gateway.Namespace, ingressNamespace) {
+				continue
+			}
+
+			// If the listener has no hostname, it's a catch-all that matches any hostname
+			var hostname string
+			if listener.Hostname == nil {
+				hostname = ""
+			} else {
+				hostname = string(*listener.Hostname)
+			}
+
+			parentRefs, ok := result[hostname]
+			if !ok {
+				parentRefs = []gatewayv1.ParentReference{}
+				result[hostname] = parentRefs
+			}
+
+			parentRefs = append(parentRefs, createParentRef(gateway, listener))
 		}
 	}
-	return false
+
+	return result
+}
+
+// isListenerAccessibleFromNamespace checks if a listener allows routes from the given namespace
+func isListenerAccessibleFromNamespace(listener gatewayv1.Listener, gatewayNamespace, ingressNamespace string) bool {
+	nsSelector := gatewayv1.NamespacesFromSame
+	if listener.AllowedRoutes != nil && listener.AllowedRoutes.Namespaces != nil && listener.AllowedRoutes.Namespaces.From != nil {
+		nsSelector = *listener.AllowedRoutes.Namespaces.From
+	}
+	return nsSelector == gatewayv1.NamespacesFromAll || (nsSelector == gatewayv1.NamespacesFromSame && gatewayNamespace == ingressNamespace)
 }
 
 func isOwnedBy(metadata metav1.ObjectMeta, owner metav1.OwnerReference) bool {
