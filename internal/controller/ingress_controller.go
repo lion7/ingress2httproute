@@ -19,9 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
 
-	"k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -31,12 +29,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	networkingv1 "k8s.io/api/networking/v1"
 )
 
 // IngressReconciler reconciles an Ingress object
@@ -58,194 +55,195 @@ type IngressReconciler struct {
 func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	httpRoute := gatewayv1.HTTPRoute{}
-	httpRouteExists := true
-	if err := r.Get(ctx, req.NamespacedName, &httpRoute); err != nil {
-		if errors.IsNotFound(err) {
-			httpRouteExists = false
-		} else {
-			return ctrl.Result{}, err
-		}
-	}
-
 	ingress := networkingv1.Ingress{}
 	if err := r.Get(ctx, req.NamespacedName, &ingress); err != nil {
 		if errors.IsNotFound(err) {
-			if !httpRouteExists {
-				return ctrl.Result{}, nil
-			}
-			if err := r.Delete(ctx, &httpRoute); err != nil {
-				logger.Error(err, fmt.Sprintf("cannot delete HTTPRoute %s", req.NamespacedName))
-			}
+			return ctrl.Result{}, nil
 		}
 		logger.Error(err, fmt.Sprintf("cannot reconcile Ingress %s", req.NamespacedName))
 		return ctrl.Result{}, err
 	}
 
-	// map the hostnames to Gateway API format
-	var hostnames []gatewayv1.Hostname
-	for _, rule := range ingress.Spec.Rules {
-		if rule.Host != "" {
-			if len(hostnames) == 0 {
-				hostnames = append(hostnames, gatewayv1.Hostname(rule.Host))
-			} else if expected := string(hostnames[0]); rule.Host != expected {
-				logger.Error(fmt.Errorf("hostname mismatch, expected %s but got %s", expected, rule.Host), "ignoring ingress rule", "ingress", req.NamespacedName, "rule", rule)
-			}
-		}
-	}
-	if hostnames == nil {
-		logger.Info("no hostnames specified")
-		return ctrl.Result{}, nil
-	}
-
-	// map the rules to Gateway API format
-	var rules []gatewayv1.HTTPRouteRule
-	for _, rule := range ingress.Spec.Rules {
-		if rule.HTTP != nil {
-			for _, path := range rule.HTTP.Paths {
-				var matches []gatewayv1.HTTPRouteMatch
-				var backendRefs []gatewayv1.HTTPBackendRef
-				pathMatch := gatewayv1.HTTPPathMatch{}
-				pathMatch.Value = &path.Path
-				if path.PathType == nil {
-					pathMatch.Type = nil
-				} else if *path.PathType == networkingv1.PathTypeExact {
-					exact := gatewayv1.PathMatchExact
-					pathMatch.Type = &exact
-				} else if *path.PathType == networkingv1.PathTypePrefix {
-					prefix := gatewayv1.PathMatchPathPrefix
-					pathMatch.Type = &prefix
-				} else if *path.PathType == networkingv1.PathTypeImplementationSpecific {
-					regex := gatewayv1.PathMatchRegularExpression
-					pathMatch.Type = &regex
-				}
-				matches = append(matches, gatewayv1.HTTPRouteMatch{Path: &pathMatch})
-
-				ref, err := r.mapBackendRef(ctx, req.Namespace, path.Backend)
-				if err != nil {
-					return ctrl.Result{}, err
-				}
-				duplicate := false
-				for _, backendRef := range backendRefs {
-					if isEqual(backendRef, ref) {
-						duplicate = true
-						break
-					}
-				}
-				if !duplicate {
-					backendRefs = append(backendRefs, ref)
-				}
-				if len(backendRefs) > 0 && ingress.Spec.DefaultBackend != nil {
-					ref, err := r.mapBackendRef(ctx, req.Namespace, *ingress.Spec.DefaultBackend)
-					if err != nil {
-						return ctrl.Result{}, err
-					}
-					duplicate := false
-					for _, backendRef := range backendRefs {
-						if isEqual(backendRef, ref) {
-							duplicate = true
-							break
-						}
-					}
-					if !duplicate {
-						backendRefs = append(backendRefs, ref)
-					}
-				}
-				rules = append(rules, gatewayv1.HTTPRouteRule{
-					Matches:     matches,
-					BackendRefs: backendRefs,
-				})
-			}
-		}
-	}
-	if rules == nil {
-		logger.Info("no rules specified")
-		return ctrl.Result{}, nil
-	}
-
-	// Find matching gateways
-	var parentRefs []gatewayv1.ParentReference
 	var gateways gatewayv1.GatewayList
 	if err := r.List(ctx, &gateways); err != nil {
 		logger.Error(err, "cannot list gateways")
 		return ctrl.Result{}, err
 	}
-	for _, gateway := range gateways.Items {
-	listeners:
-		for _, listener := range gateway.Spec.Listeners {
-			nsSelector := gatewayv1.NamespacesFromSame
-			if listener.AllowedRoutes != nil && listener.AllowedRoutes.Namespaces != nil && listener.AllowedRoutes.Namespaces.From != nil {
-				nsSelector = *listener.AllowedRoutes.Namespaces.From
-			}
-			nsMatches := nsSelector == gatewayv1.NamespacesFromAll || (nsSelector == gatewayv1.NamespacesFromSame && gateway.Namespace == req.Namespace)
-			if !nsMatches {
-				continue
-			}
-			if listener.Hostname == nil {
-				continue
-			}
-			hostname := string(*listener.Hostname)
-			if strings.HasPrefix(hostname, "*.") {
-				fqdn := strings.TrimPrefix(hostname, "*.")
-				for _, s := range hostnames {
-					if !strings.EqualFold(string(s), fqdn) && strings.HasSuffix(string(s), fqdn) {
-						parentRefs = append(parentRefs, createParentRef(gateway, listener.Name))
-						continue listeners
-					}
-				}
-			} else {
-				for _, s := range hostnames {
-					if strings.EqualFold(string(s), hostname) {
-						parentRefs = append(parentRefs, createParentRef(gateway, listener.Name))
-						continue listeners
-					}
-				}
-			}
-		}
-	}
-	if parentRefs == nil {
-		logger.Info("could not find matching gateways")
+
+	if len(gateways.Items) == 0 {
+		logger.Info("no gateways found")
 		return ctrl.Result{}, nil
 	}
 
-	newSpec := gatewayv1.HTTPRouteSpec{
+	// Filter the rules so only those with a hostname are used
+	rules := filterRules(ingress.Spec.Rules, logger)
+	if len(rules) == 0 {
+		logger.Info("no eligible ingress rules found for ingress", "ingress", req.NamespacedName)
+		return ctrl.Result{}, nil
+	}
+
+	// Extract hostnames from ingress rules
+	hostnames := extractHostnames(rules)
+
+	// Find matching gateways for the hostnames and collect unique parent refs
+	parentRefs := r.findMatchingGateways(req.Namespace, hostnames, gateways)
+	if len(parentRefs) == 0 {
+		logger.Info("no eligible parentRefs found for ingress", "ingress", req.NamespacedName)
+		return ctrl.Result{}, nil
+	}
+
+	var defaultBackendRef *gatewayv1.HTTPBackendRef
+	if ingress.Spec.DefaultBackend != nil {
+		backendRef, err := r.mapBackendRef(ctx, req.Namespace, *ingress.Spec.DefaultBackend)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		defaultBackendRef = &backendRef
+	}
+
+	// Create HTTPRoute rules for this ingress rule
+	httpRouteRules, err := r.createHTTPRouteRules(ctx, req.Namespace, rules, defaultBackendRef)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if len(httpRouteRules) == 0 {
+		logger.Info("no valid rules found for ingress", "ingress", req.NamespacedName)
+		return ctrl.Result{}, nil
+	}
+
+	spec := gatewayv1.HTTPRouteSpec{
 		CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: parentRefs},
 		Hostnames:       hostnames,
-		Rules:           rules,
+		Rules:           httpRouteRules,
+	}
+
+	// Create or update HTTPRoute for the ingress
+	owner := createOwnerReference(ingress)
+	if err := r.reconcileHTTPRoute(ctx, req.NamespacedName, owner, spec); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// findMatchingGateways finds all gateways that match the given hostnames
+func (r *IngressReconciler) findMatchingGateways(ingressNamespace string, hostnames []gatewayv1.Hostname, gateways gatewayv1.GatewayList) []gatewayv1.ParentReference {
+	// Map to track unique parent references
+	parentRefMap := make(map[string]bool)
+	var result []gatewayv1.ParentReference
+
+	for _, hostname := range hostnames {
+		for _, gateway := range gateways.Items {
+			for _, listener := range gateway.Spec.Listeners {
+				// Check namespace selector
+				nsSelector := gatewayv1.NamespacesFromSame
+				if listener.AllowedRoutes != nil && listener.AllowedRoutes.Namespaces != nil && listener.AllowedRoutes.Namespaces.From != nil {
+					nsSelector = *listener.AllowedRoutes.Namespaces.From
+				}
+				nsMatches := nsSelector == gatewayv1.NamespacesFromAll || (nsSelector == gatewayv1.NamespacesFromSame && gateway.Namespace == ingressNamespace)
+				if !nsMatches {
+					continue
+				}
+
+				if listener.Hostname == nil {
+					continue
+				}
+
+				if hostnameMatches(hostname, *listener.Hostname) {
+					parentRef := createParentRef(gateway, listener)
+					// Create a unique key for the parent reference
+					key := fmt.Sprintf("%s/%s/%s/%s/%s",
+						*parentRef.Group, *parentRef.Kind, *parentRef.Namespace, parentRef.Name, *parentRef.SectionName)
+					if !parentRefMap[key] {
+						result = append(result, parentRef)
+						parentRefMap[key] = true
+					}
+				}
+			}
+		}
+	}
+
+	return result
+}
+
+// createHTTPRouteRules converts ingress HTTP rules to HTTPRoute rules
+func (r *IngressReconciler) createHTTPRouteRules(ctx context.Context, namespace string, rules []networkingv1.IngressRule, defaultBackendRef *gatewayv1.HTTPBackendRef) ([]gatewayv1.HTTPRouteRule, error) {
+	var result []gatewayv1.HTTPRouteRule
+
+	for _, rule := range rules {
+		if rule.HTTP != nil {
+			for _, path := range rule.HTTP.Paths {
+				// Create a path match
+				pathMatch := createPathMatch(path)
+				matches := []gatewayv1.HTTPRouteMatch{{Path: &pathMatch}}
+
+				// Create backend references
+				backendRefs := make([]gatewayv1.HTTPBackendRef, 0)
+
+				// Add the path-specific backend
+				ref, err := r.mapBackendRef(ctx, namespace, path.Backend)
+				if err != nil {
+					return nil, err
+				}
+				backendRefs = append(backendRefs, ref)
+
+				// Add the default backend ref if it exists and isn't yet included
+				if defaultBackendRef != nil {
+					if !containsBackendRef(backendRefs, *defaultBackendRef) {
+						backendRefs = append(backendRefs, *defaultBackendRef)
+					}
+				}
+
+				result = append(result, gatewayv1.HTTPRouteRule{
+					Matches:     matches,
+					BackendRefs: backendRefs,
+				})
+			}
+		} else if defaultBackendRef != nil {
+			result = append(result, gatewayv1.HTTPRouteRule{
+				BackendRefs: []gatewayv1.HTTPBackendRef{*defaultBackendRef},
+			})
+		}
+	}
+
+	return result, nil
+}
+
+// reconcileHTTPRoute creates or updates a single HTTPRoute for the ingress
+func (r *IngressReconciler) reconcileHTTPRoute(ctx context.Context, name types.NamespacedName, owner metav1.OwnerReference, spec gatewayv1.HTTPRouteSpec) error {
+	logger := log.FromContext(ctx)
+	httpRoute := gatewayv1.HTTPRoute{}
+	httpRouteExists := true
+	if err := r.Get(ctx, name, &httpRoute); err != nil {
+		if errors.IsNotFound(err) {
+			httpRouteExists = false
+		} else {
+			return err
+		}
 	}
 
 	if !httpRouteExists {
-		// Create the owner reference
-		bTrue := true
-		owner := metav1.OwnerReference{
-			APIVersion:         ingress.APIVersion,
-			Kind:               ingress.Kind,
-			Name:               ingress.Name,
-			UID:                ingress.UID,
-			Controller:         &bTrue,
-			BlockOwnerDeletion: &bTrue,
-		}
-
-		if r.CrossNamespace {
-			httpRoute.SetNamespace(req.Namespace)
-		} else {
-
-		}
-		httpRoute.SetName(req.Name)
+		// Create a new HTTPRoute
+		httpRoute.SetNamespace(name.Namespace)
+		httpRoute.SetName(name.Name)
 		httpRoute.SetOwnerReferences([]metav1.OwnerReference{owner})
+		httpRoute.Spec = spec
+
 		if err := r.Create(ctx, &httpRoute); err != nil {
-			return ctrl.Result{}, err
+			return err
 		}
 
-		logger.Info("created equivalent HTTPRoute for ingress")
-	} else if !isEqual(httpRoute.Spec, newSpec) {
-		httpRoute.Spec = newSpec
+		logger.Info("created HTTPRoute", "name", name)
+	} else if isOwnedBy(httpRoute.ObjectMeta, owner) && !isEqual(httpRoute.Spec, spec) {
+		// Update existing HTTPRoute
+		httpRoute.Spec = spec
 		if err := r.Update(ctx, &httpRoute); err != nil {
-			return ctrl.Result{}, err
+			return err
 		}
-		logger.Info("updated equivalent HTTPRoute for ingress")
+		logger.Info("updated HTTPRoute", "name", name)
 	}
-	return ctrl.Result{}, nil
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -277,21 +275,6 @@ func (r *IngressReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}),
 		).
 		Complete(r)
-}
-
-func createParentRef(gateway gatewayv1.Gateway, section gatewayv1.SectionName) gatewayv1.ParentReference {
-	gvk := gateway.GroupVersionKind()
-	group := gatewayv1.Group(gvk.Group)
-	kind := gatewayv1.Kind(gvk.Kind)
-	namespace := gatewayv1.Namespace(gateway.Namespace)
-	name := gatewayv1.ObjectName(gateway.Name)
-	return gatewayv1.ParentReference{
-		Group:       &group,
-		Kind:        &kind,
-		Namespace:   &namespace,
-		Name:        name,
-		SectionName: &section,
-	}
 }
 
 func (r *IngressReconciler) mapBackendRef(ctx context.Context, namespace string, ref networkingv1.IngressBackend) (gatewayv1.HTTPBackendRef, error) {
@@ -342,14 +325,4 @@ func (r *IngressReconciler) mapBackendRef(ctx context.Context, namespace string,
 		BackendObjectReference: objectRef,
 		Weight:                 &one,
 	}}, nil
-}
-
-func isEqual(a, b interface{}) bool {
-	if l, err := json.Marshal(a); err != nil {
-		return false
-	} else if r, err := json.Marshal(b); err != nil {
-		return false
-	} else {
-		return string(l) == string(r)
-	}
 }
