@@ -1,23 +1,67 @@
 # ingress2httproute
 
-A Kubernetes controller that automatically converts Ingress resources to Gateway API HTTPRoute resources, enabling migration from Ingress to the Gateway API.
+A Kubernetes controller that enables **mounting Ingress resources onto existing Gateway API infrastructure**, providing a bridge between traditional Ingress simplicity and Gateway API power.
 
-## Description
+## Overview
 
-This controller watches for Ingress resources and creates corresponding HTTPRoute resources following a **"One Host = One HTTPRoute"** mapping pattern. Each unique hostname in an Ingress results in a separate HTTPRoute resource, ensuring clean separation and predictable behavior.
+Unlike full migration tools, `ingress2httproute` implements a **"mounting" strategy** that allows application developers to continue using familiar Ingress resources while leveraging pre-configured Gateway infrastructure managed by cluster administrators.
 
-### Mapping Rules
+### Key Features
 
-- **One HTTPRoute per hostname**: Each host in an Ingress spec creates a separate HTTPRoute
-- **Gateway selection**: HTTPRoutes automatically attach to Gateways that match the hostname (exact match, wildcard, or catch-all)
-- **Path-based routing**: All paths for a given hostname are consolidated into rules within that hostname's HTTPRoute
-- **Backend services**: Service backends are mapped with full reference details (group, kind, namespace, port, weight)
-- **Cross-namespace support**: HTTPRoutes can reference Gateways in different namespaces when allowed by the Gateway
-- **Owner references**: Created HTTPRoutes have owner references to their source Ingress for automatic cleanup
+- **🔄 Non-Invasive**: Works with existing Gateway infrastructure without modifications
+- **🎯 Hostname-Based Selection**: Automatically discovers and attaches to appropriate Gateways based on hostname matching
+- **👥 Role Separation**: Clear division between infrastructure (administrators) and application routing (developers)
+- **🔄 Live Reconciliation**: Continuous synchronization of Ingress changes to HTTPRoute resources
+- **🧹 Automatic Cleanup**: Owner references ensure HTTPRoutes are cleaned up when Ingress resources are deleted
 
-### Important Limitations
+### Architecture Philosophy
 
-⚠️ **Default backends are explicitly NOT supported**. The `spec.defaultBackend` field in Ingress resources is ignored. Default backends make the mapping complex and can have unwanted side effects when multiple HTTPRoutes interact with the same Gateway listeners. If you need catch-all behavior, configure it explicitly using path-based rules.
+```
+┌─────────────────────┐    ┌──────────────────────┐    ┌─────────────────────┐
+│   Cluster Admin     │    │    Controller        │    │  App Developer      │
+│                     │    │                      │    │                     │
+│ • Gateway Resources │───▶│ • Gateway Discovery  │◀───│ • Ingress Resources │
+│ • TLS Configuration │    │ • HTTPRoute Creation │    │ • Familiar Workflow │
+│ • Infrastructure    │    │ • Hostname Matching  │    │ • No Gateway API    │
+└─────────────────────┘    └──────────────────────┘    └─────────────────────┘
+```
+
+### What This Controller Handles
+
+- ✅ **HTTPRoute Generation**: One HTTPRoute per Ingress hostname
+- ✅ **Gateway Discovery**: Automatic selection based on hostname patterns (exact, wildcard, catch-all)
+- ✅ **Path Type Conversion**: Complete support for Prefix, Exact, and ImplementationSpecific paths
+- ✅ **Backend Translation**: Service and resource backend references with port resolution
+- ✅ **Cross-Namespace Routes**: Respects Gateway AllowedRoutes configuration
+- ✅ **Resource Management**: Proper ownership, updates, and garbage collection
+
+### What Is Deliberately Not Handled
+
+- ❌ **Gateway Creation**: Uses existing Gateway resources only
+- ❌ **TLS Management**: TLS configuration remains at Gateway level  
+- ❌ **Default Backends**: Ingress `defaultBackend` specifications are ignored
+- ❌ **IngressClass Mapping**: Uses hostname-based Gateway selection instead
+
+### Design Rationale
+
+This controller enables **gradual Gateway API adoption** by:
+- Preserving developer experience with Ingress resources
+- Maintaining administrator control over network infrastructure
+- Providing a safe experimentation path for Gateway API features
+- Supporting mixed environments during transition periods
+
+> 📖 **For complete design details, architecture decisions, and implementation principles, see [design.md](./design.md)**
+
+### Comparison with ingress2gateway
+
+| Feature | ingress2httproute | [kubernetes-sigs/ingress2gateway](https://github.com/kubernetes-sigs/ingress2gateway) |
+|---------|-------------------|-------------------------|
+| **Purpose** | Mount Ingress on existing Gateways | Complete migration to Gateway API |
+| **Gateway Management** | Uses existing infrastructure | Creates new Gateway resources |
+| **TLS Support** | Delegated to Gateway administrators | Full TLS configuration generation |
+| **Default Backends** | Not supported | Fully supported |
+| **Runtime Model** | Live controller | CLI conversion tool |
+| **Use Case** | Gradual adoption, infrastructure control | Full migration, self-service model |
 
 ## Getting Started
 
