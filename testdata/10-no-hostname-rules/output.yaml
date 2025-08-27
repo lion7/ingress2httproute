@@ -1,0 +1,31 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: no-hostname-app-valid-example-com
+  namespace: default
+  ownerReferences:
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    name: no-hostname-app
+    uid: "12345678-1234-1234-1234-123456789012"
+    controller: true
+    blockOwnerDeletion: true
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: default
+    name: example-gw
+    sectionName: http
+  hostnames:
+  - "valid.example.com"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /api
+    backendRefs:
+    - name: api-service
+      port: 9090
+      weight: 1
+# Note: The rule without hostname should be ignored, so no HTTPRoute created for it

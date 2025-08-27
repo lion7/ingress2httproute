@@ -1,0 +1,29 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: default-only-default
+  namespace: default
+  ownerReferences:
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    name: default-only
+    uid: "12345678-1234-1234-1234-123456789012"
+    controller: true
+    blockOwnerDeletion: true
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: default
+    name: example-gw
+    sectionName: http
+  # No hostnames - catch all hosts
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: catch-all-service
+      port: 8080
+      weight: 1

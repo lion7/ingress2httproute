@@ -1,0 +1,73 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: priority-test
+  namespace: default
+spec:
+  ingressClassName: prod-class
+  rules:
+  - host: api.priority.com
+    http:
+      paths:
+      - path: /v1
+        pathType: Prefix
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 8080
+  - host: priority.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-service
+            port:
+              number: 80
+---
+# Multiple Gateways with different specificity levels
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: exact-priority-gw
+  namespace: default
+spec:
+  gatewayClassName: prod-class
+  listeners:
+  - name: exact-api
+    protocol: HTTP
+    port: 80
+    hostname: "api.priority.com"  # Exact match - highest priority
+  - name: exact-root
+    protocol: HTTP  
+    port: 8080
+    hostname: "priority.com"      # Exact match - highest priority
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: wildcard-priority-gw
+  namespace: default
+spec:
+  gatewayClassName: prod-class
+  listeners:
+  - name: wildcard
+    protocol: HTTP
+    port: 80
+    hostname: "*.priority.com"    # Wildcard match - medium priority
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: catch-all-priority-gw
+  namespace: default
+spec:
+  gatewayClassName: prod-class
+  listeners:
+  - name: catch-all
+    protocol: HTTP
+    port: 80
+    # No hostname - catch-all, lowest priority

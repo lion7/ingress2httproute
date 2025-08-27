@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: resource-backend-app
+  namespace: default
+spec:
+  ingressClassName: prod-class
+  rules:
+  - host: storage.example.com
+    http:
+      paths:
+      - path: /files
+        pathType: Prefix
+        backend:
+          resource:
+            apiGroup: custom.example.com
+            kind: FileServer
+            name: main-storage
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 8080

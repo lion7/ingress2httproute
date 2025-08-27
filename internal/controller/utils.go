@@ -55,8 +55,8 @@ func hostnameMatches(ingressHostname, listenerHostname gatewayv1.Hostname) bool 
 func createOwnerReference(ingress networkingv1.Ingress) metav1.OwnerReference {
 	bTrue := true
 	return metav1.OwnerReference{
-		APIVersion:         ingress.APIVersion,
-		Kind:               ingress.Kind,
+		APIVersion:         "networking.k8s.io/v1",
+		Kind:               "Ingress",
 		Name:               ingress.Name,
 		UID:                ingress.UID,
 		Controller:         &bTrue,

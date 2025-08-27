@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: no-hostname-app
+  namespace: default
+spec:
+  ingressClassName: prod-class
+  rules:
+  - http:  # No hostname specified - should be ignored per spec
+      paths:
+      - path: /catch-all
+        pathType: Prefix
+        backend:
+          service:
+            name: catch-all-service
+            port:
+              number: 8080
+  - host: valid.example.com
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 9090

@@ -1,0 +1,48 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: tls-app
+  namespace: default
+  ownerReferences:
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    name: tls-app
+    uid: "12345678-1234-1234-1234-123456789012"
+    controller: true
+    blockOwnerDeletion: true
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: default
+    name: tls-gw
+    sectionName: https
+  hostnames:
+  - "secure.example.com"
+  - "api.secure.example.com"
+  - "admin.secure.example.com"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: web-service
+      port: 80
+      weight: 1
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /v1
+    backendRefs:
+    - name: secure-service
+      port: 443
+      weight: 1
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /admin
+    backendRefs:
+    - name: admin-service
+      port: 9090
+      weight: 1

@@ -1,0 +1,40 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: resource-backend-app-storage-example-com
+  namespace: default
+  ownerReferences:
+  - apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    name: resource-backend-app
+    uid: "12345678-1234-1234-1234-123456789012"
+    controller: true
+    blockOwnerDeletion: true
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    namespace: default
+    name: example-gw
+    sectionName: http
+  hostnames:
+  - "storage.example.com"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /files
+    backendRefs:
+    - group: custom.example.com
+      kind: FileServer
+      name: main-storage
+      namespace: default
+      weight: 1
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /api
+    backendRefs:
+    - name: api-service
+      port: 8080
+      weight: 1

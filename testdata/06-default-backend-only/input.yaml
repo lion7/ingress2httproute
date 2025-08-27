@@ -1,0 +1,12 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: default-only
+  namespace: default
+spec:
+  ingressClassName: prod-class
+  defaultBackend:
+    service:
+      name: catch-all-service
+      port:
+        number: 8080
