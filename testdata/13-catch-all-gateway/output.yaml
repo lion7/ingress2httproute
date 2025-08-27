@@ -25,7 +25,10 @@ spec:
         type: PathPrefix
         value: /test
     backendRefs:
-    - name: test-service
+    - group: ""
+      kind: Service
+      name: test-service
+      namespace: default
       port: 8080
       weight: 1
 ---
@@ -56,6 +59,9 @@ spec:
         type: PathPrefix
         value: /
     backendRefs:
-    - name: another-service
+    - group: ""
+      kind: Service
+      name: another-service
+      namespace: default
       port: 9090
       weight: 1

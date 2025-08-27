@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -78,18 +79,13 @@ func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
+	if len(ingress.Spec.Rules) == 0 {
+		logger.Info("no rules found")
+		return ctrl.Result{}, nil
+	}
+
 	// Create owner reference early for reuse
 	owner := createOwnerReference(ingress)
-
-	// Map default backend ref if it exists (reused across all routes)
-	var defaultBackendRef *gatewayv1.HTTPBackendRef
-	if ingress.Spec.DefaultBackend != nil {
-		backendRef, err := r.mapBackendRef(ctx, req.Namespace, *ingress.Spec.DefaultBackend)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		defaultBackendRef = backendRef
-	}
 
 	// Group rules by hostname
 	ingressRules := groupRulesByHostname(ingress.Spec.Rules)
@@ -105,8 +101,8 @@ func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Namespace: req.Namespace,
 		}
 
-		// Find parent refs specific to this hostname
-		routeParentRefs := parentRefs[hostname]
+		// Find parent refs matching this hostname
+		routeParentRefs := findMatchingGateways(hostname, parentRefs)
 		if len(routeParentRefs) == 0 {
 			continue
 		}
@@ -118,7 +114,7 @@ func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 
 		// Map the Ingress rules for this specific hostname to HTTPRoute rules
-		routeRules, err := r.mapToHTTPRouteRules(ctx, req.Namespace, matchingRules, defaultBackendRef)
+		routeRules, err := r.mapToHTTPRouteRules(ctx, req.Namespace, matchingRules)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -143,7 +139,7 @@ func (r *IngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 // mapToHTTPRouteRules converts ingress HTTP rules to HTTPRoute rules
-func (r *IngressReconciler) mapToHTTPRouteRules(ctx context.Context, namespace string, rules []networkingv1.IngressRule, defaultBackendRef *gatewayv1.HTTPBackendRef) ([]gatewayv1.HTTPRouteRule, error) {
+func (r *IngressReconciler) mapToHTTPRouteRules(ctx context.Context, namespace string, rules []networkingv1.IngressRule) ([]gatewayv1.HTTPRouteRule, error) {
 	var result []gatewayv1.HTTPRouteRule
 
 	for _, rule := range rules {
@@ -157,12 +153,6 @@ func (r *IngressReconciler) mapToHTTPRouteRules(ctx context.Context, namespace s
 				if err != nil {
 					return nil, err
 				}
-
-				// Use the default backend ref if there is no explicit backend ref specified
-				if backendRef == nil && defaultBackendRef != nil {
-					backendRef = defaultBackendRef
-				}
-
 				if backendRef == nil {
 					return nil, fmt.Errorf("no backend found for path '%s'", path.Path)
 				}
@@ -172,14 +162,10 @@ func (r *IngressReconciler) mapToHTTPRouteRules(ctx context.Context, namespace s
 					BackendRefs: []gatewayv1.HTTPBackendRef{*backendRef},
 				})
 			}
-		} else if defaultBackendRef != nil {
-			// For rules without an HTTP section, create a default path match
-			result = append(result, gatewayv1.HTTPRouteRule{
-				BackendRefs: []gatewayv1.HTTPBackendRef{*defaultBackendRef},
-			})
 		}
 	}
 
+	slices.SortStableFunc(result, compareHTTPRouteRule)
 	return result, nil
 }
 

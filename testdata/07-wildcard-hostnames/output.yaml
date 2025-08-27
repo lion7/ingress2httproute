@@ -30,7 +30,10 @@ spec:
         type: PathPrefix
         value: /
     backendRefs:
-    - name: admin-service
+    - group: ""
+      kind: Service
+      name: admin-service
+      namespace: default
       port: 9090
       weight: 1
 ---
@@ -66,7 +69,10 @@ spec:
         type: PathPrefix
         value: /v1
     backendRefs:
-    - name: api-service
+    - group: ""
+      kind: Service
+      name: api-service
+      namespace: default
       port: 8080
       weight: 1
 ---
@@ -102,6 +108,9 @@ spec:
         type: Exact
         value: /special
     backendRefs:
-    - name: special-service
+    - group: ""
+      kind: Service
+      name: special-service
+      namespace: default
       port: 3000
       weight: 1

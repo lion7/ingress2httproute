@@ -21,7 +21,6 @@ spec:
             name: api-service
             port:
               number: 9000
-  - host: default.example.com
   - host: static.example.com
     http:
       paths:

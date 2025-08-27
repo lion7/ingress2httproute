@@ -25,7 +25,10 @@ spec:
         type: PathPrefix
         value: /
     backendRefs:
-    - name: admin-service
+    - group: ""
+      kind: Service
+      name: admin-service
+      namespace: default
       port: 9090
       weight: 1
   - matches:
@@ -33,7 +36,10 @@ spec:
         type: Exact
         value: /dashboard
     backendRefs:
-    - name: dashboard-service
+    - group: ""
+      kind: Service
+      name: dashboard-service
+      namespace: default
       port: 3000
       weight: 1
 ---
@@ -64,7 +70,10 @@ spec:
         type: PathPrefix
         value: /v1
     backendRefs:
-    - name: api-v1-service
+    - group: ""
+      kind: Service
+      name: api-v1-service
+      namespace: default
       port: 8080
       weight: 1
   - matches:
@@ -72,6 +81,9 @@ spec:
         type: PathPrefix
         value: /v2
     backendRefs:
-    - name: api-v2-service
+    - group: ""
+      kind: Service
+      name: api-v2-service
+      namespace: default
       port: 8081
       weight: 1

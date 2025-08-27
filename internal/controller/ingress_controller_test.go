@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -31,39 +32,44 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/yaml"
 
 	networkingv1 "k8s.io/api/networking/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 const (
-	timeout     = time.Second * 10
+	timeout     = time.Second * 3
 	interval    = time.Millisecond * 250
 	testdataDir = "../../testdata"
 )
 
 var _ = Describe("Ingress Controller", func() {
 	ctx := context.Background()
+	deserializer := serializer.NewCodecFactory(scheme.Scheme).UniversalDeserializer()
+	yamlCommentRegexp := regexp.MustCompile("#.*")
 
 	// Helper function to load multiple objects from a multi-doc YAML file
-	loadMultipleFromYAML := func(filePath string) ([]ctrlclient.Object, error) {
+	loadFromYAML := func(filePath string) ([]ctrlclient.Object, error) {
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return nil, err
 		}
 
 		var objects []ctrlclient.Object
-		decode := serializer.NewCodecFactory(scheme.Scheme).UniversalDeserializer().Decode
+
+		// Remove any YAML comments
+		yaml := yamlCommentRegexp.ReplaceAllString(string(data), "")
 
 		// Split by YAML document separator
-		docs := strings.Split(string(data), "---")
+		docs := strings.Split(yaml, "---")
 		for _, doc := range docs {
 			doc = strings.TrimSpace(doc)
 			if doc == "" {
 				continue
 			}
 
-			obj, _, err := decode([]byte(doc), nil, nil)
+			obj, _, err := deserializer.Decode([]byte(doc), nil, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -113,59 +119,11 @@ var _ = Describe("Ingress Controller", func() {
 	// Helper function to validate HTTPRoute against expected
 	validateHTTPRouteAgainstExpected := func(actual *gatewayv1.HTTPRoute, expected *gatewayv1.HTTPRoute) {
 		By(fmt.Sprintf("validating HTTPRoute %s matches expected", actual.Name))
-
-		// Validate hostnames
-		if len(expected.Spec.Hostnames) > 0 {
-			Expect(actual.Spec.Hostnames).To(HaveLen(len(expected.Spec.Hostnames)))
-			for i, expectedHostname := range expected.Spec.Hostnames {
-				Expect(actual.Spec.Hostnames[i]).To(Equal(expectedHostname))
-			}
-		} else {
-			// For catch-all routes, hostnames should be empty
-			Expect(actual.Spec.Hostnames).To(BeEmpty())
-		}
-
-		// Validate parent references structure
-		Expect(actual.Spec.ParentRefs).To(HaveLen(len(expected.Spec.ParentRefs)))
-		for i, expectedParentRef := range expected.Spec.ParentRefs {
-			actualParentRef := actual.Spec.ParentRefs[i]
-			Expect(actualParentRef.Group).To(Equal(expectedParentRef.Group))
-			Expect(actualParentRef.Kind).To(Equal(expectedParentRef.Kind))
-			Expect(actualParentRef.Name).To(Equal(expectedParentRef.Name))
-
-			if expectedParentRef.Namespace != nil {
-				Expect(actualParentRef.Namespace).NotTo(BeNil())
-				Expect(*actualParentRef.Namespace).To(Equal(*expectedParentRef.Namespace))
-			}
-		}
-
-		// Validate rules structure
-		Expect(actual.Spec.Rules).To(HaveLen(len(expected.Spec.Rules)))
-
-		// Validate first rule (most tests have single rule)
-		if len(expected.Spec.Rules) > 0 {
-			expectedRule := expected.Spec.Rules[0]
-			actualRule := actual.Spec.Rules[0]
-
-			// Validate matches
-			Expect(actualRule.Matches).To(HaveLen(len(expectedRule.Matches)))
-
-			// Validate backend references
-			Expect(actualRule.BackendRefs).To(HaveLen(len(expectedRule.BackendRefs)))
-			for i, expectedBackendRef := range expectedRule.BackendRefs {
-				actualBackendRef := actualRule.BackendRefs[i]
-				Expect(actualBackendRef.Name).To(Equal(expectedBackendRef.Name))
-				if expectedBackendRef.Port != nil {
-					Expect(actualBackendRef.Port).NotTo(BeNil())
-					Expect(*actualBackendRef.Port).To(Equal(*expectedBackendRef.Port))
-				}
-			}
-		}
-
-		// Validate owner references
-		Expect(actual.OwnerReferences).To(HaveLen(1))
-		Expect(actual.OwnerReferences[0].Kind).To(Equal("Ingress"))
-		Expect(*actual.OwnerReferences[0].Controller).To(BeTrue())
+		actualSpec, err := yaml.Marshal(actual.Spec)
+		Expect(err).NotTo(HaveOccurred())
+		expectedSpec, err := yaml.Marshal(expected.Spec)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(actualSpec).To(MatchYAML(expectedSpec))
 	}
 
 	// Helper function to cleanup resources
@@ -219,7 +177,7 @@ var _ = Describe("Ingress Controller", func() {
 
 				// Load and apply default resources
 				defaultPath := filepath.Join(testdataDir, "default.yaml")
-				defaultObjs, err := loadMultipleFromYAML(defaultPath)
+				defaultObjs, err := loadFromYAML(defaultPath)
 				if err != nil {
 					Fail(fmt.Sprintf("Failed to load default.yaml: %v", err))
 				}
@@ -227,7 +185,7 @@ var _ = Describe("Ingress Controller", func() {
 
 				// Load input objects from input.yaml
 				inputPath := filepath.Join(testdataDir, tc, "input.yaml")
-				inputObjs, err := loadMultipleFromYAML(inputPath)
+				inputObjs, err := loadFromYAML(inputPath)
 				if err != nil {
 					Fail(fmt.Sprintf("Failed to load input.yaml: %v", err))
 				}
@@ -241,7 +199,7 @@ var _ = Describe("Ingress Controller", func() {
 
 				// Load expected HTTPRoutes from output.yaml
 				outputPath := filepath.Join(testdataDir, tc, "output.yaml")
-				outputObjs, err := loadMultipleFromYAML(outputPath)
+				outputObjs, err := loadFromYAML(outputPath)
 				if err != nil {
 					Fail(fmt.Sprintf("Failed to load output.yaml: %v", err))
 				}

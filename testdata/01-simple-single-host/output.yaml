@@ -25,6 +25,9 @@ spec:
         type: PathPrefix
         value: /
     backendRefs:
-    - name: app-service
+    - group: ""
+      kind: Service
+      name: app-service
+      namespace: default
       port: 80
       weight: 1

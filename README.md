@@ -1,8 +1,23 @@
 # ingress2httproute
-// TODO(user): Add simple overview of use/purpose
+
+A Kubernetes controller that automatically converts Ingress resources to Gateway API HTTPRoute resources, enabling migration from Ingress to the Gateway API.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+
+This controller watches for Ingress resources and creates corresponding HTTPRoute resources following a **"One Host = One HTTPRoute"** mapping pattern. Each unique hostname in an Ingress results in a separate HTTPRoute resource, ensuring clean separation and predictable behavior.
+
+### Mapping Rules
+
+- **One HTTPRoute per hostname**: Each host in an Ingress spec creates a separate HTTPRoute
+- **Gateway selection**: HTTPRoutes automatically attach to Gateways that match the hostname (exact match, wildcard, or catch-all)
+- **Path-based routing**: All paths for a given hostname are consolidated into rules within that hostname's HTTPRoute
+- **Backend services**: Service backends are mapped with full reference details (group, kind, namespace, port, weight)
+- **Cross-namespace support**: HTTPRoutes can reference Gateways in different namespaces when allowed by the Gateway
+- **Owner references**: Created HTTPRoutes have owner references to their source Ingress for automatic cleanup
+
+### Important Limitations
+
+⚠️ **Default backends are explicitly NOT supported**. The `spec.defaultBackend` field in Ingress resources is ignored. Default backends make the mapping complex and can have unwanted side effects when multiple HTTPRoutes interact with the same Gateway listeners. If you need catch-all behavior, configure it explicitly using path-based rules.
 
 ## Getting Started
 
@@ -22,12 +37,6 @@ make docker-build docker-push IMG=<some-registry>/ingress2httproute:tag
 **NOTE:** This image ought to be published in the personal registry you specified.
 And it is required to have access to pull the image from the working environment.
 Make sure you have the proper permission to the registry if the above commands don’t work.
-
-**Install the CRDs into the cluster:**
-
-```sh
-make install
-```
 
 **Deploy the Manager to the cluster with the image specified by `IMG`:**
 
@@ -52,12 +61,6 @@ kubectl apply -k config/samples/
 
 ```sh
 kubectl delete -k config/samples/
-```
-
-**Delete the APIs(CRDs) from the cluster:**
-
-```sh
-make uninstall
 ```
 
 **UnDeploy the controller from the cluster:**
@@ -90,7 +93,8 @@ kubectl apply -f https://raw.githubusercontent.com/<org>/ingress2httproute/<tag 
 ```
 
 ## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+
+Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests.
 
 **NOTE:** Run `make help` for more information on all potential `make` targets
 

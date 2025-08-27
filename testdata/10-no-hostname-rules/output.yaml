@@ -25,7 +25,10 @@ spec:
         type: PathPrefix
         value: /api
     backendRefs:
-    - name: api-service
+    - group: ""
+      kind: Service
+      name: api-service
+      namespace: default
       port: 9090
       weight: 1
 # Note: The rule without hostname should be ignored, so no HTTPRoute created for it

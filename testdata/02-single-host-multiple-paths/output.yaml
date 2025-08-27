@@ -22,25 +22,34 @@ spec:
   rules:
   - matches:
     - path:
-        type: PathPrefix
-        value: /api
-    backendRefs:
-    - name: api-service
-      port: 8080
-      weight: 1
-  - matches:
-    - path:
-        type: PathExact
+        type: Exact
         value: /admin
     backendRefs:
-    - name: admin-service
+    - group: ""
+      kind: Service
+      name: admin-service
+      namespace: default
       port: 9090
       weight: 1
   - matches:
     - path:
-        type: PathExact
+        type: PathPrefix
+        value: /api
+    backendRefs:
+    - group: ""
+      kind: Service
+      name: api-service
+      namespace: default
+      port: 8080
+      weight: 1
+  - matches:
+    - path:
+        type: Exact
         value: /health
     backendRefs:
-    - name: health-service
+    - group: ""
+      kind: Service
+      name: health-service
+      namespace: default
       port: 8080
       weight: 1

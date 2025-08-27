@@ -25,7 +25,9 @@ spec:
         type: PathPrefix
         value: /api
     backendRefs:
-    - name: app-service
+    - group: ""
+      kind: Service
+      name: app-service
       namespace: app-namespace  # Backend in same namespace as HTTPRoute
       port: 8080
       weight: 1

@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	networkingv1 "k8s.io/api/networking/v1"
@@ -13,24 +14,14 @@ import (
 // generateHTTPRouteName creates a HTTPRoute name from ingress name and hostname
 // Following the pattern: ingressName-hostname-with-dots-replaced-by-dashes
 func generateHTTPRouteName(ingressName, hostname string) string {
-	// Replace dots and special characters with dashes for valid Kubernetes names
-	cleanHostname := strings.ReplaceAll(hostname, ".", "-")
-	cleanHostname = strings.ReplaceAll(cleanHostname, "*", "wildcard")
-	return fmt.Sprintf("%s-%s", ingressName, cleanHostname)
-}
-
-// hostnameMatches checks if the ingress hostname matches the gateway listener hostname
-func hostnameMatches(ingressHostname, listenerHostname gatewayv1.Hostname) bool {
-	ingressHost := string(ingressHostname)
-	listenerHost := string(listenerHostname)
-
-	if strings.HasPrefix(listenerHost, "*.") {
-		fqdn := strings.TrimPrefix(listenerHost, "*.")
-		// Allow both subdomain matches and exact domain matches for wildcard patterns
-		return strings.EqualFold(ingressHost, fqdn) || strings.HasSuffix(ingressHost, fqdn)
+	if hostname == "" {
+		return ingressName
+	} else {
+		// Replace dots and special characters with dashes for valid Kubernetes names
+		cleanHostname := strings.ReplaceAll(hostname, ".", "-")
+		cleanHostname = strings.ReplaceAll(cleanHostname, "*", "wildcard")
+		return fmt.Sprintf("%s-%s", ingressName, cleanHostname)
 	}
-
-	return strings.EqualFold(ingressHost, listenerHost)
 }
 
 func createOwnerReference(ingress networkingv1.Ingress) metav1.OwnerReference {
@@ -90,13 +81,8 @@ func groupRulesByHostname(rules []networkingv1.IngressRule) map[string][]network
 
 	for _, rule := range rules {
 		hostname := rule.Host
-		slice, ok := result[hostname]
-		if !ok {
-			slice = []networkingv1.IngressRule{}
-			result[hostname] = slice
-		}
-
-		slice = append(slice, rule)
+		existingRules := result[hostname]
+		result[hostname] = append(existingRules, rule)
 	}
 
 	return result
@@ -120,13 +106,8 @@ func groupGatewaysByHostNameAndMapToParentRefs(ingressNamespace string, gateways
 				hostname = string(*listener.Hostname)
 			}
 
-			parentRefs, ok := result[hostname]
-			if !ok {
-				parentRefs = []gatewayv1.ParentReference{}
-				result[hostname] = parentRefs
-			}
-
-			parentRefs = append(parentRefs, createParentRef(gateway, listener))
+			existingParentRefs := result[hostname]
+			result[hostname] = append(existingParentRefs, createParentRef(gateway, listener))
 		}
 	}
 
@@ -140,6 +121,31 @@ func isListenerAccessibleFromNamespace(listener gatewayv1.Listener, gatewayNames
 		nsSelector = *listener.AllowedRoutes.Namespaces.From
 	}
 	return nsSelector == gatewayv1.NamespacesFromAll || (nsSelector == gatewayv1.NamespacesFromSame && gatewayNamespace == ingressNamespace)
+}
+
+// findMatchingParentRefs finds all parentRefs that match the given hostname
+func findMatchingGateways(ingressHost string, parentRefsGroupedByHostname map[string][]gatewayv1.ParentReference) []gatewayv1.ParentReference {
+	var result []gatewayv1.ParentReference
+
+	for hostname, references := range parentRefsGroupedByHostname {
+		if hostname == "" || hostnameMatches(ingressHost, hostname) {
+			result = append(result, references...)
+		}
+	}
+
+	slices.SortStableFunc(result, compareParentRef)
+	return result
+}
+
+// hostnameMatches checks if the ingress hostname matches the gateway listener hostname
+func hostnameMatches(ingressHost, listenerHost string) bool {
+	if strings.HasPrefix(listenerHost, "*.") {
+		fqdn := strings.TrimPrefix(listenerHost, "*.")
+		// Allow only subdomain matches and not exact domain matches for wildcard patterns
+		return strings.HasSuffix(ingressHost, fqdn) && !strings.EqualFold(ingressHost, fqdn)
+	}
+
+	return strings.EqualFold(ingressHost, listenerHost)
 }
 
 func isOwnedBy(metadata metav1.ObjectMeta, owner metav1.OwnerReference) bool {

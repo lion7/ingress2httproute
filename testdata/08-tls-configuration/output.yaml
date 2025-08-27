@@ -35,7 +35,10 @@ spec:
         type: PathPrefix
         value: /dashboard
     backendRefs:
-    - name: admin-service
+    - group: ""
+      kind: Service
+      name: admin-service
+      namespace: default
       port: 9090
       weight: 1
 ---
@@ -76,7 +79,10 @@ spec:
         type: PathPrefix
         value: /v1
     backendRefs:
-    - name: api-service
+    - group: ""
+      kind: Service
+      name: api-service
+      namespace: default
       port: 8080
       weight: 1
 ---
@@ -99,16 +105,6 @@ spec:
     namespace: default
     name: example-gw
     sectionName: http
-  - group: gateway.networking.k8s.io
-    kind: Gateway
-    namespace: default
-    name: tls-gw
-    sectionName: http
-  - group: gateway.networking.k8s.io
-    kind: Gateway
-    namespace: default
-    name: tls-gw
-    sectionName: https
   hostnames:
   - "secure.example.com"
   rules:
@@ -117,6 +113,9 @@ spec:
         type: PathPrefix
         value: /
     backendRefs:
-    - name: web-service
+    - group: ""
+      kind: Service
+      name: web-service
+      namespace: default
       port: 80
       weight: 1
